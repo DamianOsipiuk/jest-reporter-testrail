@@ -45,10 +45,10 @@ const prepareConfig = (options: Config): Config => {
     coverageCaseId: Number((process.env.TESTRAIL_COVERAGE_CASE_ID || config.coverageCaseId).replace("C", "").trim()),
     runName: process.env.TESTRAIL_RUN_NAME || config.runName || "%BRANCH%#%BUILD% - %DATE%",
     runDescription: process.env.TESTRAIL_RUN_DESCRIPTION || config.runDescription,
-    reference: process.env.TESTRAIL_REFERENCE || config.reference || "%BRANCH%#%BUILD%",
-    branchEnv: process.env.BRANCH_ENV || config.branchEnv || "BRANCH",
-    buildNoEnv: process.env.BUILD_NO_ENV || config.buildNoEnv || "BUILD_NUMBER",
-    dateFormat: process.env.DATE_FORMAT || config.dateFormat || "YYYY-MM-DD HH:mm:ss",
+    reference: process.env.TESTRAIL_REFERENCE || config.reference,
+    branchEnv: process.env.TESTRAIL_BRANCH_ENV || config.branchEnv || "BRANCH",
+    buildNoEnv: process.env.TESTRAIL_BUILD_NO_ENV || config.buildNoEnv || "BUILD_NUMBER",
+    dateFormat: process.env.TESTRAIL_DATE_FORMAT || config.dateFormat || "YYYY-MM-DD HH:mm:ss",
   };
 };
 
@@ -61,7 +61,7 @@ const prepareReportName = (config: Config, branch: string, buildNo: string) => {
 };
 
 const prepareReference = (config: Config, branch: string, buildNo: string) => {
-  return config.reference.replace("%BRANCH%", branch).replace("%BUILD%", buildNo);
+  return config.reference ? config.reference.replace("%BRANCH%", branch).replace("%BUILD%", buildNo): '';
 };
 
 const prepareReport = (results: AggregatedResult) => {
@@ -97,7 +97,7 @@ const prepareReport = (results: AggregatedResult) => {
   return report;
 };
 
-export class TestrailReporter {
+export default class JestTestrailReporter {
   private config: Config;
 
   private branch: string;
@@ -111,7 +111,7 @@ export class TestrailReporter {
   }
 
   async onRunComplete(contexts: any, results: AggregatedResult) {
-    const { enabled, host, user, apiKey, projectId, planId, suiteId, coverageCaseId } = this.config;
+    const { enabled, host, user, apiKey, projectId, planId, suiteId, coverageCaseId, runDescription } = this.config;
 
     if (!user || !apiKey) {
       console.info("[TestRail] Username or api key was not provided.");
@@ -133,14 +133,14 @@ export class TestrailReporter {
       const testrail = new TestRail(host, user, apiKey);
       const name = prepareReportName(this.config, this.branch, this.buildNo);
       const refs = prepareReference(this.config, this.branch, this.buildNo);
-      const description = prepareReport(results);
+      const report = prepareReport(results);
 
       const runPayload = {
         suite_id: suiteId,
         include_all: false,
         case_ids: [coverageCaseId],
         name,
-        description,
+        description: runDescription || report,
         refs,
       };
 
@@ -166,15 +166,15 @@ export class TestrailReporter {
           {
             case_id: coverageCaseId,
             status_id: results.numFailedTests ? 5 : 1,
-            comment: description,
+            comment: report,
           },
         ]);
 
         if (resultArray.length) {
-            console.info("[TestRail] Sending report to TestRail successfull");
-          } else {
-            console.error("[TestRail] Sending report to TestRail failed", response);
-          }
+          console.info("[TestRail] Sending report to TestRail successfull");
+        } else {
+          console.error("[TestRail] Sending report to TestRail failed", response);
+        }
       }
     }
   }
