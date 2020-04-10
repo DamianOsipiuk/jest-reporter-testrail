@@ -1,16 +1,18 @@
 {
   "name": "jest-reporter-testrail",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Reporter plugin that sends test coverage and test results to TestRail",
   "main": "lib/index.js",
+  "files": [
+    "/lib"
+  ],
   "typings": "lib/index.d.ts",
   "engines": {
     "node": ">=10.8"
   },
   "scripts": {
     "prepare": "npm run build",
-    "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc"
   },
   "repository": {
     "type": "git",
@@ -30,11 +32,10 @@
   "homepage": "https://github.com/DamianOsipiuk/jest-reporter-testrail#readme",
   "dependencies": {
     "moment": "^2.24.0",
-    "testrail-js-api": "^0.1.2"
+    "testrail-js-api": "^0.1.5"
   },
   "devDependencies": {
-    "@jest/test-result": "^25.1.0",
-    "@types/node": "^13.7.7",
+    "@types/node": "^13.11.1",
     "@types/node-fetch": "^2.5.5",
     "typescript": "^3.8.3"
   }
