@@ -6,7 +6,34 @@ import fs from "fs";
 import path from "path";
 import moment from "moment";
 import { TestRail, Run } from "testrail-js-api";
-import { AggregatedResult } from "@jest/test-result";
+
+type CoverageStat = {
+  pct: number;
+  total: number;
+  covered: number;
+  skipped: number;
+};
+
+interface AggregatedResult {
+  numTotalTests: number;
+  numPassedTests: number;
+  numPendingTests: number;
+  numFailedTests: number;
+  numTotalTestSuites: number;
+  numPassedTestSuites: number;
+  numPendingTestSuites: number;
+  numFailedTestSuites: number;
+  coverageMap?: {
+    getCoverageSummary: () => {
+      data: {
+        branches: CoverageStat;
+        functions: CoverageStat;
+        lines: CoverageStat;
+        statements: CoverageStat;
+      };
+    };
+  };
+}
 
 interface Config<T = number> {
   enabled: boolean;
@@ -54,14 +81,11 @@ const prepareConfig = (options: Config): Config => {
 
 const prepareReportName = (config: Config, branch: string, buildNo: string) => {
   const date = moment().format(config.dateFormat);
-  return config.runName
-    .replace("%BRANCH%", branch)
-    .replace("%BUILD%", buildNo)
-    .replace("%DATE%", date);
+  return config.runName.replace("%BRANCH%", branch).replace("%BUILD%", buildNo).replace("%DATE%", date);
 };
 
 const prepareReference = (config: Config, branch: string, buildNo: string) => {
-  return config.reference ? config.reference.replace("%BRANCH%", branch).replace("%BUILD%", buildNo): '';
+  return config.reference ? config.reference.replace("%BRANCH%", branch).replace("%BUILD%", buildNo) : "";
 };
 
 const prepareReport = (results: AggregatedResult) => {
