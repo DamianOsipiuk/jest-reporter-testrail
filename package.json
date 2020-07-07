@@ -1,6 +1,6 @@
 {
   "name": "jest-reporter-testrail",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Reporter plugin that sends test coverage and test results to TestRail",
   "main": "lib/index.js",
   "files": [
