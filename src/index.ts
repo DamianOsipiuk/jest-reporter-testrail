@@ -41,7 +41,6 @@ interface Config<T = number> {
   user: string;
   apiKey: string;
   projectId: T;
-  planId: T;
   suiteId: T;
   runName: string;
   runDescription: string;
@@ -50,12 +49,16 @@ interface Config<T = number> {
   buildNoEnv: string;
   dateFormat: string;
   reference: string;
+  runCloseAfterDays: number;
 }
 
 const loadJSON = (file: string) => {
   const data = fs.readFileSync(file, { encoding: "utf8" });
 
-  return JSON.parse(data);
+  if (data) {
+    return JSON.parse(data);
+  }
+  return {};
 };
 
 const prepareConfig = (options: Config): Config => {
@@ -67,15 +70,17 @@ const prepareConfig = (options: Config): Config => {
     user: process.env.TESTRAIL_USER || config.user,
     apiKey: process.env.TESTRAIL_API_KEY || config.apiKey,
     projectId: Number((process.env.TESTRAIL_PROJECT_ID || config.projectId || "").replace("P", "").trim()),
-    planId: Number((process.env.TESTRAIL_PLAN_ID || config.planId || "").replace("R", "").trim()),
     suiteId: Number((process.env.TESTRAIL_SUITE_ID || config.suiteId || "").replace("S", "").trim()),
-    coverageCaseId: Number((process.env.TESTRAIL_COVERAGE_CASE_ID || config.coverageCaseId).replace("C", "").trim()),
+    coverageCaseId: Number(
+      (process.env.TESTRAIL_COVERAGE_CASE_ID || config.coverageCaseId || "").replace("C", "").trim()
+    ),
     runName: process.env.TESTRAIL_RUN_NAME || config.runName || "%BRANCH%#%BUILD% - %DATE%",
     runDescription: process.env.TESTRAIL_RUN_DESCRIPTION || config.runDescription,
     reference: process.env.TESTRAIL_REFERENCE || config.reference,
     branchEnv: process.env.TESTRAIL_BRANCH_ENV || config.branchEnv || "BRANCH",
     buildNoEnv: process.env.TESTRAIL_BUILD_NO_ENV || config.buildNoEnv || "BUILD_NUMBER",
     dateFormat: process.env.TESTRAIL_DATE_FORMAT || config.dateFormat || "YYYY-MM-DD HH:mm:ss",
+    runCloseAfterDays: Number(process.env.TESTRAIL_RUN_CLOSE_AFTER_DAYS || config.runCloseAfterDays) || 0,
   };
 };
 
@@ -121,6 +126,51 @@ const prepareReport = (results: AggregatedResult) => {
   return report;
 };
 
+const verifyConfig = (config: Config) => {
+  const { enabled, host, user, apiKey, projectId, suiteId, coverageCaseId } = config;
+  if (enabled) {
+    if (!host) {
+      console.log("[TestRail] Hostname was not provided.");
+    }
+
+    if (!user || !apiKey) {
+      console.log("[TestRail] Username or api key was not provided.");
+    }
+
+    if (!projectId) {
+      console.log("[TestRail] Project id was not provided.");
+    }
+
+    if (!coverageCaseId) {
+      console.log("[TestRail] Coverage testcase id was not provided.");
+    }
+
+    if (!suiteId) {
+      console.log("[TestRail] Suite id was not provided.");
+    }
+
+    if (host && user && apiKey && projectId && coverageCaseId && suiteId) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const throwOnApiError = async <T>(apiResult: Promise<T>): Promise<T> => {
+  const { response, value } = (await apiResult) as any;
+  if (response.status >= 400) {
+    console.error("[TestRail] Error during API request");
+    throw {
+      url: response.url,
+      status: response.status,
+      message: value,
+    };
+  }
+
+  return Promise.resolve(({ response, value } as any) as T);
+};
+
 export default class JestTestrailReporter {
   private config: Config;
 
@@ -135,70 +185,67 @@ export default class JestTestrailReporter {
   }
 
   async onRunComplete(contexts: any, results: AggregatedResult) {
-    const { enabled, host, user, apiKey, projectId, planId, suiteId, coverageCaseId, runDescription } = this.config;
+    const { host, user, apiKey, projectId, suiteId, coverageCaseId, runDescription } = this.config;
 
-    if (!user || !apiKey) {
-      console.info("[TestRail] Username or api key was not provided.");
-    }
+    if (verifyConfig(this.config)) {
+      try {
+        const testrail = new TestRail(host, user, apiKey);
+        const name = prepareReportName(this.config, this.branch, this.buildNo);
+        const refs = prepareReference(this.config, this.branch, this.buildNo);
+        const report = prepareReport(results);
 
-    if (!projectId) {
-      console.info("[TestRail] Project id was not provided.");
-    }
+        // Check for existing not closed runs with the same refs string.
+        const { value: runs } = await throwOnApiError(testrail.getRuns(projectId, { is_completed: 0 }));
+        const existingRun = runs?.find((run) => run.refs === refs);
 
-    if (!coverageCaseId) {
-      console.info("[TestRail] Coverage testcase id was not provided.");
-    }
+        let run: Run | undefined;
+        if (existingRun) {
+          run = existingRun;
+          const { value: tests } = await throwOnApiError(testrail.getTests(existingRun.id));
+          const currentCaseIds = tests?.map((test) => test.case_id) || [];
+          const additionalDescription = "\n" + runDescription || report;
 
-    if (!suiteId) {
-      console.info("[TestRail] Suite id was not provided.");
-    }
+          await throwOnApiError(
+            testrail.updateRun(existingRun.id, {
+              description: existingRun.description.replace(additionalDescription, "") + additionalDescription,
+              case_ids: [...currentCaseIds, coverageCaseId],
+            })
+          );
 
-    if (enabled && host && user && apiKey && projectId && coverageCaseId && suiteId) {
-      const testrail = new TestRail(host, user, apiKey);
-      const name = prepareReportName(this.config, this.branch, this.buildNo);
-      const refs = prepareReference(this.config, this.branch, this.buildNo);
-      const report = prepareReport(results);
-
-      const runPayload = {
-        suite_id: suiteId,
-        include_all: false,
-        case_ids: [coverageCaseId],
-        name,
-        description: runDescription || report,
-        refs,
-      };
-
-      let run: Run | undefined;
-      if (planId) {
-        const { response, value: planEntry } = await testrail.addPlanEntry(planId, runPayload);
-        if (planEntry?.runs?.length) {
-          run = planEntry.runs[0];
+          console.log(`[TestRail] Test run updated successfully: ${name}`);
         } else {
-          console.error("[TestRail] Plan entry creation failed", response);
-        }
-      } else {
-        const { response, value: runEntry } = await testrail.addRun(projectId, runPayload);
-        if (runEntry?.id) {
-          run = runEntry;
-        } else {
-          console.error("[TestRail] Run creation failed", response);
-        }
-      }
+          const payload = {
+            suite_id: suiteId,
+            include_all: false,
+            case_ids: [coverageCaseId],
+            name,
+            description: runDescription || report,
+            refs,
+          };
 
-      if (run?.id) {
-        const { response, value: resultArray } = await testrail.addResultsForCases(run.id, [
-          {
-            case_id: coverageCaseId,
-            status_id: results.numFailedTests ? 5 : 1,
-            comment: report,
-          },
-        ]);
+          const { value: newRun } = await throwOnApiError(testrail.addRun(this.config.projectId, payload));
+          run = newRun;
 
-        if (resultArray.length) {
-          console.info("[TestRail] Sending report to TestRail successfull");
-        } else {
-          console.error("[TestRail] Sending report to TestRail failed", response);
+          console.log(`[TestRail] Test run added successfully: ${name}`);
         }
+
+        if (run?.id) {
+          const { value: resultArray } = await throwOnApiError(
+            testrail.addResultsForCases(run.id, [
+              {
+                case_id: coverageCaseId,
+                status_id: results.numFailedTests ? 5 : 1,
+                comment: report,
+              },
+            ])
+          );
+
+          if (resultArray.length) {
+            console.log("[TestRail] Sending report to TestRail successfull");
+          }
+        }
+      } catch (error) {
+        console.error("[TestRail] Sending report to TestRail failed", error);
       }
     }
   }
