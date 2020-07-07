@@ -1,7 +1,3 @@
-/*
- * Copyright (c) 2020 Juniper Networks, Inc. All rights reserved.
- */
-
 import fs from "fs";
 import path from "path";
 import moment from "moment";
